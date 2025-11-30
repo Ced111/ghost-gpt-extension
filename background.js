@@ -7,7 +7,9 @@ class SettingsStore {
             "imagePrompt",
             "textPrompt",
             "lastAnswer",
-            "lastState" // idle | busy | ready | error
+            "lastState",       // idle | busy | ready | error
+            "sessionHistory",  // [{ kind: "image", dataUrl }, { kind: "text", text }]
+            "sessionEnabled"   // boolean
         ]);
     }
 
@@ -52,36 +54,50 @@ class ResponseStore {
     }
 }
 
-// ==== Client OpenAI Responses (vision + texte), temperature = 0 en dur ====
-
+/**
+ * Client OpenAI Responses
+ * - instructions = prompt de préparation
+ * - historyMessages = historique de TES messages (texte + images)
+ * - dernier message (image ou texte)
+ * Température fixée à 0.
+ */
 class OpenAIResponsesClient {
     constructor(apiKey) {
         this.apiKey = apiKey;
     }
 
-    // IMAGE : préparation + prompt image + image
-    async createVisionResponse({ model, systemPrompt, imagePrompt, imageDataUrl }) {
-        const prep = systemPrompt || "";
-        const imgPrompt = imagePrompt || "";
+    /**
+     * historyMessages : tableau déjà construit au format:
+     * [
+     *   { role: "user", content: [ { type: "input_text"|"input_image", ... } ] },
+     *   ...
+     * ]
+     */
+    async createVisionResponse({ model, instructions, historyMessages, imagePrompt, imageDataUrl }) {
+        const input = Array.isArray(historyMessages) ? [...historyMessages] : [];
+
+        const latestContent = [];
+        if (imagePrompt && imagePrompt.trim()) {
+            latestContent.push({
+                type: "input_text",
+                text: imagePrompt.trim()
+            });
+        }
+        latestContent.push({
+            type: "input_image",
+            image_url: imageDataUrl
+        });
+
+        input.push({
+            role: "user",
+            content: latestContent
+        });
 
         const body = {
             model,
             temperature: 0,
-            input: [
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: `${prep}\n\n${imgPrompt}`.trim()
-                        },
-                        {
-                            type: "input_image",
-                            image_url: imageDataUrl
-                        }
-                    ]
-                }
-            ]
+            instructions: instructions || "",
+            input
         };
 
         const res = await fetch("https://api.openai.com/v1/responses", {
@@ -101,26 +117,29 @@ class OpenAIResponsesClient {
         return await res.json();
     }
 
-    // TEXTE : préparation + prompt texte + texte sélectionné
-    async createTextResponse({ model, systemPrompt, textPrompt, rawText }) {
-        const prep = systemPrompt || "";
-        const tPrompt = textPrompt || "";
-        const contentText = `${prep}\n\n${tPrompt}\n\n${rawText || ""}`.trim();
+    async createTextResponse({ model, instructions, historyMessages, textPrompt, rawText }) {
+        const input = Array.isArray(historyMessages) ? [...historyMessages] : [];
+
+        const pieces = [];
+        if (textPrompt && textPrompt.trim()) pieces.push(textPrompt.trim());
+        if (rawText && rawText.trim()) pieces.push(rawText.trim());
+        const textForThisTurn = pieces.join("\n\n").trim() || rawText || "";
+
+        input.push({
+            role: "user",
+            content: [
+                {
+                    type: "input_text",
+                    text: textForThisTurn
+                }
+            ]
+        });
 
         const body = {
             model,
             temperature: 0,
-            input: [
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "input_text",
-                            text: contentText
-                        }
-                    ]
-                }
-            ]
+            instructions: instructions || "",
+            input
         };
 
         const res = await fetch("https://api.openai.com/v1/responses", {
@@ -248,6 +267,9 @@ class ClipboardReader {
 // ===== Menus contextuels =====
 
 chrome.runtime.onInstalled.addListener(async () => {
+    const settings = await SettingsStore.get();
+    const enabled = !!settings.sessionEnabled;
+
     chrome.contextMenus.create({
         id: "ghostgpt-copy-last",
         title: "Copier la dernière réponse (Ghost GPT)",
@@ -260,16 +282,43 @@ chrome.runtime.onInstalled.addListener(async () => {
         contexts: ["selection"]
     });
 
+    chrome.contextMenus.create({
+        id: "ghostgpt-toggle-session",
+        title: enabled ? "Désactiver la session (Ghost GPT)" : "Activer la session (Ghost GPT)",
+        contexts: ["action"]
+    });
+
     await StateIndicator.setIdle();
 });
 
-// clic droit sur icône → copier dernière réponse
+// clic droit sur icône → copier / activer session / désactiver session
 chrome.contextMenus.onClicked.addListener(async (info) => {
     try {
         if (info.menuItemId === "ghostgpt-copy-last") {
             const answer = await ResponseStore.getLastAnswer();
             if (!answer) return;
             await ClipboardWriter.writeTextToClipboardViaActiveTab(answer);
+            await StateIndicator.setIdle();
+            return;
+        }
+
+        if (info.menuItemId === "ghostgpt-toggle-session") {
+            const settings = await SettingsStore.get();
+            const enabled = !!settings.sessionEnabled;
+            const newValue = !enabled;
+
+            // On bascule l'état + on reset l'historique à chaque bascule
+            await SettingsStore.set({
+                sessionEnabled: newValue,
+                sessionHistory: []
+            });
+
+            chrome.contextMenus.update("ghostgpt-toggle-session", {
+                title: newValue
+                    ? "Désactiver la session (Ghost GPT)"
+                    : "Activer la session (Ghost GPT)"
+            });
+
             await StateIndicator.setIdle();
             return;
         }
@@ -305,6 +354,34 @@ chrome.action.onClicked.addListener(async () => {
     }
 });
 
+// ===== Utilitaires session → messages OpenAI =====
+
+function buildHistoryMessages(sessionHistory) {
+    if (!Array.isArray(sessionHistory)) return [];
+
+    const msgs = [];
+    for (const item of sessionHistory) {
+        if (!item || !item.kind) continue;
+
+        if (item.kind === "image" && item.dataUrl) {
+            msgs.push({
+                role: "user",
+                content: [
+                    { type: "input_image", image_url: item.dataUrl }
+                ]
+            });
+        } else if (item.kind === "text" && item.text) {
+            msgs.push({
+                role: "user",
+                content: [
+                    { type: "input_text", text: item.text }
+                ]
+            });
+        }
+    }
+    return msgs;
+}
+
 // ===== Flows =====
 
 async function runClipboardFlow() {
@@ -318,24 +395,43 @@ async function runClipboardFlow() {
     const client = new OpenAIResponsesClient(settings.apiKey);
     const model = (settings.model || "gpt-4o-mini").trim();
     const systemPrompt = settings.systemPrompt || "Tu es un assistant concis.";
+    const sessionEnabled = !!settings.sessionEnabled;
+
+    const sessionHistory = sessionEnabled && Array.isArray(settings.sessionHistory)
+        ? [...settings.sessionHistory]
+        : [];
+
+    const historyMessages = sessionEnabled ? buildHistoryMessages(sessionHistory) : [];
 
     let responseJson;
 
     if (clip.kind === "image") {
         responseJson = await client.createVisionResponse({
             model,
-            systemPrompt,
+            instructions: systemPrompt,
+            historyMessages,
             imagePrompt: settings.imagePrompt || "",
             imageDataUrl: clip.dataUrl
         });
 
+        if (sessionEnabled) {
+            sessionHistory.push({ kind: "image", dataUrl: clip.dataUrl });
+            await SettingsStore.set({ sessionHistory });
+        }
+
     } else if (clip.kind === "text") {
         responseJson = await client.createTextResponse({
             model,
-            systemPrompt,
+            instructions: systemPrompt,
+            historyMessages,
             textPrompt: settings.textPrompt || "",
             rawText: clip.text || ""
         });
+
+        if (sessionEnabled) {
+            sessionHistory.push({ kind: "text", text: clip.text || "" });
+            await SettingsStore.set({ sessionHistory });
+        }
 
     } else {
         throw new Error("Clipboard is empty or blocked.");
@@ -355,13 +451,26 @@ async function runTextFlow(text) {
     const client = new OpenAIResponsesClient(settings.apiKey);
     const model = (settings.model || "gpt-4o-mini").trim();
     const systemPrompt = settings.systemPrompt || "Tu es un assistant concis.";
+    const sessionEnabled = !!settings.sessionEnabled;
+
+    const sessionHistory = sessionEnabled && Array.isArray(settings.sessionHistory)
+        ? [...settings.sessionHistory]
+        : [];
+
+    const historyMessages = sessionEnabled ? buildHistoryMessages(sessionHistory) : [];
 
     const responseJson = await client.createTextResponse({
         model,
-        systemPrompt,
+        instructions: systemPrompt,
+        historyMessages,
         textPrompt: settings.textPrompt || "",
         rawText: text || ""
     });
+
+    if (sessionEnabled) {
+        sessionHistory.push({ kind: "text", text: text || "" });
+        await SettingsStore.set({ sessionHistory });
+    }
 
     const answer = OpenAIResponsesClient.extractOutputText(responseJson);
     await ResponseStore.setLastAnswer(answer);
