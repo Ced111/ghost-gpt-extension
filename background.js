@@ -66,6 +66,50 @@ class OpenAIResponsesClient {
         this.apiKey = apiKey;
     }
 
+    // --- Helper interne avec timeout de 30 secondes ---
+    async _postWithTimeout(body, timeoutMs = 30000) {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const res = await fetch("https://api.openai.com/v1/responses", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${this.apiKey}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(body),
+                signal: controller.signal
+            });
+
+            clearTimeout(id);
+
+            if (!res.ok) {
+                const errText = await res.text().catch(() => "");
+                throw new Error(
+                    `La requête OpenAI a échoué (code ${res.status}). ` +
+                    (errText || res.statusText || "Aucun détail supplémentaire n'a été fourni.")
+                );
+            }
+
+            return await res.json();
+        } catch (e) {
+            clearTimeout(id);
+            if (e.name === "AbortError") {
+                // Timeout explicite
+                throw new Error(
+                    "La requête vers l'API OpenAI a dépassé 30 secondes et a été annulée. " +
+                    "Cela peut venir d'un texte très long, d'une image lourde ou d'un problème de réseau / API."
+                );
+            }
+            // Autre erreur réseau / fetch
+            throw new Error(
+                "Erreur lors de l'appel à l'API OpenAI : " +
+                (e.message || e.toString())
+            );
+        }
+    }
+
     /**
      * historyMessages : tableau déjà construit au format:
      * [
@@ -100,21 +144,8 @@ class OpenAIResponsesClient {
             input
         };
 
-        const res = await fetch("https://api.openai.com/v1/responses", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.apiKey}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(body)
-        });
-
-        if (!res.ok) {
-            const errText = await res.text().catch(() => "");
-            throw new Error(`OpenAI error ${res.status}: ${errText || res.statusText}`);
-        }
-
-        return await res.json();
+        // --- maintenant on passe par le helper avec timeout ---
+        return await this._postWithTimeout(body, 20000);
     }
 
     async createTextResponse({ model, instructions, historyMessages, textPrompt, rawText }) {
@@ -142,21 +173,8 @@ class OpenAIResponsesClient {
             input
         };
 
-        const res = await fetch("https://api.openai.com/v1/responses", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${this.apiKey}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(body)
-        });
-
-        if (!res.ok) {
-            const errText = await res.text().catch(() => "");
-            throw new Error(`OpenAI error ${res.status}: ${errText || res.statusText}`);
-        }
-
-        return await res.json();
+        // --- idem, on passe par le helper avec timeout ---
+        return await this._postWithTimeout(body, 20000);
     }
 
     static extractOutputText(responseJson) {
