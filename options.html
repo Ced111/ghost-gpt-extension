@@ -7,42 +7,39 @@
     <style>
         body { font-family: system-ui, sans-serif; margin: 16px; max-width: 900px; }
         label { display:block; margin: 12px 0 6px; font-weight: 600; }
-        input, textarea, select { width: 100%; padding: 10px; box-sizing: border-box; }
-        textarea { min-height: 120px; }
-        .row { display:flex; gap:12px; }
-        .row > div { flex: 1; }
+        input, textarea { width: 100%; padding: 10px; box-sizing: border-box; }
+        textarea { min-height: 160px; }
         button { margin-top: 14px; padding: 10px 14px; cursor: pointer; }
         .hint { color:#666; font-size: 13px; line-height: 1.4; }
         code { background:#f3f3f3; padding: 2px 6px; border-radius: 6px; }
     </style>
 </head>
 <body>
+
 <h2>Ghost GPT — Options</h2>
 
 <label>Clé API OpenAI</label>
 <input id="apiKey" type="password" placeholder="sk-..." />
 <div class="hint">
-    ⚠️ Stockée localement dans l'extension. Pour être “vraiment” sécurisé, il faudrait un petit serveur proxy.
+    Stockée localement dans l'extension.
 </div>
 
-<div class="row">
-    <div>
-        <label>Modèle</label>
-        <input id="model" type="text" value="gpt-4o-mini" />
-        <div class="hint">
-            Exemples : <code>gpt-4.1</code>, <code>gpt-4o</code>, <code>gpt-4o-mini</code>
-        </div>
-    </div>
+<label>Modèle</label>
+<input id="model" type="text" value="gpt-4o-mini" />
+<div class="hint">
+    Exemples : <code>gpt-4.1</code>, <code>gpt-4o</code>, <code>gpt-4o-mini</code>
 </div>
 
-<label>Prompt “préparation” (instructions générales)</label>
-<textarea id="systemPrompt">Tu es un assistant très concis. Réponds en bullet points quand possible. Va droit au résultat.</textarea>
+<label>Pré-prompt unique (injecté une seule fois par session)</label>
+<textarea id="prePrompt">
+Tu es un assistant contrôleur de gestion très concis.
+Réponds en bullet points quand possible.
+</textarea>
 
-<label>Prompt image (ce que tu veux faire avec les screenshots)</label>
-<textarea id="imagePrompt">Analyse ce screenshot. Extrait toutes les informations importantes et reformule clairement. Si c'est du texte: retranscris fidèlement. Si c'est un tableau: structure proprement.</textarea>
-
-<label>Prompt texte (si on envoie une sélection de texte)</label>
-<textarea id="textPrompt">Réponds à partir du texte suivant, de façon efficace et actionnable.</textarea>
+<div class="hint">
+    Ce pré-prompt est envoyé uniquement au premier message de la session,
+    puis conservé côté API via <code>previous_response_id</code>.
+</div>
 
 <button id="save">Enregistrer</button>
 <span id="status" class="hint"></span>
@@ -50,3 +47,4 @@
 <script src="options.js"></script>
 </body>
 </html>
+

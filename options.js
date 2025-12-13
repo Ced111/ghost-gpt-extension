@@ -4,31 +4,26 @@ async function load() {
     const data = await chrome.storage.local.get([
         "apiKey",
         "model",
-        "systemPrompt",
-        "imagePrompt",
-        "textPrompt"
+        "prePrompt"
     ]);
 
     $("apiKey").value = data.apiKey || "";
     $("model").value = data.model || "gpt-4o-mini";
-    $("systemPrompt").value = data.systemPrompt || $("systemPrompt").value;
-    $("imagePrompt").value = data.imagePrompt || $("imagePrompt").value;
-    $("textPrompt").value = data.textPrompt || $("textPrompt").value;
+    $("prePrompt").value = data.prePrompt || $("prePrompt").value;
 }
 
 async function save() {
     const apiKey = $("apiKey").value.trim();
     const model = $("model").value.trim() || "gpt-4o-mini";
+    const prePrompt = $("prePrompt").value || "";
 
     await chrome.storage.local.set({
         apiKey,
         model,
-        systemPrompt: $("systemPrompt").value,
-        imagePrompt: $("imagePrompt").value,
-        textPrompt: $("textPrompt").value
+        prePrompt
     });
 
-    $("status").textContent = "✅ Enregistré";
+    $("status").textContent = "Enregistré";
     setTimeout(() => ($("status").textContent = ""), 1200);
 }
 

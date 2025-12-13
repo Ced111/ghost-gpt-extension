@@ -1,18 +1,18 @@
+// =======================
+// Storage
+// =======================
 class SettingsStore {
     static async get() {
         return await chrome.storage.local.get([
             "apiKey",
             "model",
-            "systemPrompt",
-            "imagePrompt",
-            "textPrompt",
+            "prePrompt",
             "lastAnswer",
-            "lastState",       // idle | busy | ready | error
-            "sessionHistory",  // [{ kind: "image", dataUrl }, { kind: "text", text }]
-            "sessionEnabled"   // boolean
+            "lastState",             // idle | busy | ready | error
+            "sessionEnabled",        // boolean
+            "sessionLastResponseId"  // string|null
         ]);
     }
-
     static async set(obj) {
         await chrome.storage.local.set(obj);
     }
@@ -23,22 +23,19 @@ class StateIndicator {
         await chrome.action.setBadgeText({ text: "" });
         await SettingsStore.set({ lastState: "idle" });
     }
-
     static async setBusy() {
         await chrome.action.setBadgeText({ text: "…" });
-        await chrome.action.setBadgeBackgroundColor({ color: "#f59e0b" }); // orange
+        await chrome.action.setBadgeBackgroundColor({ color: "#f59e0b" });
         await SettingsStore.set({ lastState: "busy" });
     }
-
     static async setReady() {
         await chrome.action.setBadgeText({ text: "✓" });
-        await chrome.action.setBadgeBackgroundColor({ color: "#22c55e" }); // vert
+        await chrome.action.setBadgeBackgroundColor({ color: "#22c55e" });
         await SettingsStore.set({ lastState: "ready" });
     }
-
     static async setError() {
         await chrome.action.setBadgeText({ text: "ERR" });
-        await chrome.action.setBadgeBackgroundColor({ color: "#ef4444" }); // rouge
+        await chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
         await SettingsStore.set({ lastState: "error" });
     }
 }
@@ -47,32 +44,27 @@ class ResponseStore {
     static async setLastAnswer(answer) {
         await SettingsStore.set({ lastAnswer: answer });
     }
-
     static async getLastAnswer() {
         const { lastAnswer } = await SettingsStore.get();
         return lastAnswer || "";
     }
 }
 
-/**
- * Client OpenAI Responses
- * - instructions = prompt de préparation
- * - historyMessages = historique de TES messages (texte + images)
- * - dernier message (image ou texte)
- * Température fixée à 0.
- */
+// =======================
+// OpenAI Responses client
+// =======================
 class OpenAIResponsesClient {
     constructor(apiKey) {
         this.apiKey = apiKey;
+        this.endpoint = "https://api.openai.com/v1/responses";
     }
 
-    // --- Helper interne avec timeout de 30 secondes ---
-    async _postWithTimeout(body, timeoutMs = 30000) {
+    async _post(body, timeoutMs = 20000) {
         const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), timeoutMs);
+        const t = setTimeout(() => controller.abort(), timeoutMs);
 
         try {
-            const res = await fetch("https://api.openai.com/v1/responses", {
+            const res = await fetch(this.endpoint, {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${this.apiKey}`,
@@ -82,129 +74,102 @@ class OpenAIResponsesClient {
                 signal: controller.signal
             });
 
-            clearTimeout(id);
-
             if (!res.ok) {
                 const errText = await res.text().catch(() => "");
-                throw new Error(
-                    `La requête OpenAI a échoué (code ${res.status}). ` +
-                    (errText || res.statusText || "Aucun détail supplémentaire n'a été fourni.")
-                );
+                throw new Error(`OpenAI HTTP ${res.status}: ${errText || res.statusText || "No details"}`);
             }
-
             return await res.json();
         } catch (e) {
-            clearTimeout(id);
-            if (e.name === "AbortError") {
-                // Timeout explicite
-                throw new Error(
-                    "La requête vers l'API OpenAI a dépassé 30 secondes et a été annulée. " +
-                    "Cela peut venir d'un texte très long, d'une image lourde ou d'un problème de réseau / API."
-                );
-            }
-            // Autre erreur réseau / fetch
-            throw new Error(
-                "Erreur lors de l'appel à l'API OpenAI : " +
-                (e.message || e.toString())
-            );
+            if (e?.name === "AbortError") throw new Error("OpenAI request timeout.");
+            throw new Error("OpenAI request failed: " + (e?.message || String(e)));
+        } finally {
+            clearTimeout(t);
         }
     }
 
-    /**
-     * historyMessages : tableau déjà construit au format:
-     * [
-     *   { role: "user", content: [ { type: "input_text"|"input_image", ... } ] },
-     *   ...
-     * ]
-     */
-    async createVisionResponse({ model, instructions, historyMessages, imagePrompt, imageDataUrl }) {
-        const input = Array.isArray(historyMessages) ? [...historyMessages] : [];
+    _buildBody({ model, prePrompt, previousResponseId, userContent }) {
+        const input = [];
 
-        const latestContent = [];
-        if (imagePrompt && imagePrompt.trim()) {
-            latestContent.push({
-                type: "input_text",
-                text: imagePrompt.trim()
-            });
+        // Injecte le pré-prompt uniquement au 1er tour (ou si session OFF)
+        if (!previousResponseId && prePrompt && prePrompt.trim()) {
+            input.push({ role: "developer", content: prePrompt.trim() });
         }
-        latestContent.push({
-            type: "input_image",
-            image_url: imageDataUrl
-        });
 
-        input.push({
-            role: "user",
-            content: latestContent
-        });
+        input.push({ role: "user", content: userContent });
 
         const body = {
             model,
             temperature: 0,
-            instructions: instructions || "",
+            store: true,
             input
         };
 
-        // --- maintenant on passe par le helper avec timeout ---
-        return await this._postWithTimeout(body, 20000);
+        if (previousResponseId) body.previous_response_id = previousResponseId;
+        return body;
     }
 
-    async createTextResponse({ model, instructions, historyMessages, textPrompt, rawText }) {
-        const input = Array.isArray(historyMessages) ? [...historyMessages] : [];
+    async sendText({ model, prePrompt, previousResponseId = null, text }) {
+        const t = (text || "").trim();
+        if (!t) throw new Error("No text provided.");
 
-        const pieces = [];
-        if (textPrompt && textPrompt.trim()) pieces.push(textPrompt.trim());
-        if (rawText && rawText.trim()) pieces.push(rawText.trim());
-        const textForThisTurn = pieces.join("\n\n").trim() || rawText || "";
-
-        input.push({
-            role: "user",
-            content: [
-                {
-                    type: "input_text",
-                    text: textForThisTurn
-                }
-            ]
+        const body = this._buildBody({
+            model,
+            prePrompt,
+            previousResponseId,
+            userContent: [{ type: "input_text", text: t }]
         });
 
-        const body = {
-            model,
-            temperature: 0,
-            instructions: instructions || "",
-            input
-        };
-
-        // --- idem, on passe par le helper avec timeout ---
-        return await this._postWithTimeout(body, 20000);
+        return await this._post(body);
     }
 
-    static extractOutputText(responseJson) {
-        if (typeof responseJson?.output_text === "string" && responseJson.output_text.trim()) {
-            return responseJson.output_text.trim();
-        }
+    async sendImage({ model, prePrompt, previousResponseId = null, imageDataUrl, hintText = "" }) {
+        if (!imageDataUrl) throw new Error("No image provided.");
 
-        const output = responseJson?.output;
-        if (Array.isArray(output)) {
-            const chunks = [];
-            for (const item of output) {
+        const content = [];
+        const hint = (hintText || "").trim();
+        if (hint) content.push({ type: "input_text", text: hint });
+        content.push({ type: "input_image", image_url: imageDataUrl });
+
+        const body = this._buildBody({
+            model,
+            prePrompt,
+            previousResponseId,
+            userContent: content
+        });
+
+        return await this._post(body);
+    }
+
+    static extractText(resp) {
+        if (typeof resp?.output_text === "string" && resp.output_text.trim()) {
+            return resp.output_text.trim();
+        }
+        const out = resp?.output;
+        if (Array.isArray(out)) {
+            const parts = [];
+            for (const item of out) {
                 const content = item?.content;
                 if (Array.isArray(content)) {
                     for (const c of content) {
-                        if (typeof c?.text === "string") chunks.push(c.text);
+                        if (typeof c?.text === "string") parts.push(c.text);
                     }
                 }
-                if (typeof item?.text === "string") chunks.push(item.text);
+                if (typeof item?.text === "string") parts.push(item.text);
             }
-
-            const joined = chunks.join("\n").trim();
+            const joined = parts.join("\n").trim();
             if (joined) return joined;
         }
+        return JSON.stringify(resp, null, 2);
+    }
 
-        return JSON.stringify(responseJson, null, 2);
+    static extractResponseId(resp) {
+        return typeof resp?.id === "string" ? resp.id : null;
     }
 }
 
-// ===== Clipboard helpers =====
-
+// =======================
+// Clipboard helpers
+// =======================
 class ClipboardWriter {
     static async writeTextToClipboardViaActiveTab(text) {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -213,9 +178,7 @@ class ClipboardWriter {
         await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             args: [text],
-            func: async (t) => {
-                await navigator.clipboard.writeText(t);
-            }
+            func: async (t) => { await navigator.clipboard.writeText(t); }
         });
     }
 }
@@ -232,58 +195,54 @@ class ClipboardReader {
                     const arrayBuffer = await blob.arrayBuffer();
                     const bytes = new Uint8Array(arrayBuffer);
                     let binary = "";
-                    for (let i = 0; i < bytes.length; i++) {
-                        binary += String.fromCharCode(bytes[i]);
-                    }
+                    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
                     const base64 = btoa(binary);
                     return `data:${blob.type};base64,${base64}`;
                 }
 
-                async function readClipboardBestEffort() {
-                    if (navigator.clipboard?.read) {
-                        try {
-                            const items = await navigator.clipboard.read();
-                            for (const item of items) {
-                                const types = item.types || [];
-                                const pick =
-                                    types.includes("image/png") ? "image/png" :
-                                        types.includes("image/jpeg") ? "image/jpeg" :
-                                            null;
+                // Image si possible
+                if (navigator.clipboard?.read) {
+                    try {
+                        const items = await navigator.clipboard.read();
+                        for (const item of items) {
+                            const types = item.types || [];
+                            const pick =
+                                types.includes("image/png") ? "image/png" :
+                                    types.includes("image/jpeg") ? "image/jpeg" :
+                                        null;
 
-                                if (pick) {
-                                    const blob = await item.getType(pick);
-                                    const dataUrl = await blobToDataUrl(blob);
-                                    return { kind: "image", dataUrl };
-                                }
+                            if (pick) {
+                                const blob = await item.getType(pick);
+                                const dataUrl = await blobToDataUrl(blob);
+                                return { kind: "image", dataUrl };
                             }
-                        } catch (e) {
-                            console.warn("Clipboard image read blocked", e);
                         }
+                    } catch (e) {
+                        console.warn("Clipboard image read blocked", e);
                     }
-
-                    if (navigator.clipboard?.readText) {
-                        try {
-                            const text = await navigator.clipboard.readText();
-                            if (text && text.trim()) return { kind: "text", text };
-                        } catch (e) {
-                            console.warn("Clipboard text read blocked", e);
-                        }
-                    }
-
-                    return { kind: "empty" };
                 }
 
-                return await readClipboardBestEffort();
+                // Texte fallback
+                if (navigator.clipboard?.readText) {
+                    try {
+                        const text = await navigator.clipboard.readText();
+                        if (text && text.trim()) return { kind: "text", text };
+                    } catch (e) {
+                        console.warn("Clipboard text read blocked", e);
+                    }
+                }
+
+                return { kind: "empty" };
             }
         });
 
-        if (!result) return { kind: "empty" };
-        return result;
+        return result || { kind: "empty" };
     }
 }
 
-// ===== Menus contextuels =====
-
+// =======================
+// Menus
+// =======================
 chrome.runtime.onInstalled.addListener(async () => {
     const settings = await SettingsStore.get();
     const enabled = !!settings.sessionEnabled;
@@ -309,7 +268,6 @@ chrome.runtime.onInstalled.addListener(async () => {
     await StateIndicator.setIdle();
 });
 
-// clic droit sur icône → copier / activer session / désactiver session
 chrome.contextMenus.onClicked.addListener(async (info) => {
     try {
         if (info.menuItemId === "ghostgpt-copy-last") {
@@ -322,19 +280,15 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
 
         if (info.menuItemId === "ghostgpt-toggle-session") {
             const settings = await SettingsStore.get();
-            const enabled = !!settings.sessionEnabled;
-            const newValue = !enabled;
+            const newValue = !settings.sessionEnabled;
 
-            // On bascule l'état + on reset l'historique à chaque bascule
             await SettingsStore.set({
                 sessionEnabled: newValue,
-                sessionHistory: []
+                sessionLastResponseId: null // reset pour repartir proprement
             });
 
             chrome.contextMenus.update("ghostgpt-toggle-session", {
-                title: newValue
-                    ? "Désactiver la session (Ghost GPT)"
-                    : "Activer la session (Ghost GPT)"
+                title: newValue ? "Désactiver la session (Ghost GPT)" : "Activer la session (Ghost GPT)"
             });
 
             await StateIndicator.setIdle();
@@ -352,7 +306,6 @@ chrome.contextMenus.onClicked.addListener(async (info) => {
     }
 });
 
-// clic gauche sur icône → si READY => copie ; sinon => envoie clipboard (image ou texte)
 chrome.action.onClicked.addListener(async () => {
     try {
         const { lastState } = await SettingsStore.get();
@@ -372,35 +325,14 @@ chrome.action.onClicked.addListener(async () => {
     }
 });
 
-// ===== Utilitaires session → messages OpenAI =====
-
-function buildHistoryMessages(sessionHistory) {
-    if (!Array.isArray(sessionHistory)) return [];
-
-    const msgs = [];
-    for (const item of sessionHistory) {
-        if (!item || !item.kind) continue;
-
-        if (item.kind === "image" && item.dataUrl) {
-            msgs.push({
-                role: "user",
-                content: [
-                    { type: "input_image", image_url: item.dataUrl }
-                ]
-            });
-        } else if (item.kind === "text" && item.text) {
-            msgs.push({
-                role: "user",
-                content: [
-                    { type: "input_text", text: item.text }
-                ]
-            });
-        }
-    }
-    return msgs;
+// =======================
+// Flows
+// =======================
+function pickPrePrompt(settings) {
+    // prePrompt nouveau ; fallback sur systemPrompt si tu n'as pas migré options
+    const p = (settings.prePrompt || settings.systemPrompt || "").trim();
+    return p || "Tu es un assistant concis.";
 }
-
-// ===== Flows =====
 
 async function runClipboardFlow() {
     const settings = await SettingsStore.get();
@@ -409,53 +341,39 @@ async function runClipboardFlow() {
     await StateIndicator.setBusy();
 
     const clip = await ClipboardReader.readClipboardViaInjectedScript();
+    if (clip.kind === "empty") throw new Error("Clipboard is empty or blocked.");
 
     const client = new OpenAIResponsesClient(settings.apiKey);
     const model = (settings.model || "gpt-4o-mini").trim();
-    const systemPrompt = settings.systemPrompt || "Tu es un assistant concis.";
+    const prePrompt = pickPrePrompt(settings);
+
     const sessionEnabled = !!settings.sessionEnabled;
+    const previousResponseId = sessionEnabled ? (settings.sessionLastResponseId || null) : null;
 
-    const sessionHistory = sessionEnabled && Array.isArray(settings.sessionHistory)
-        ? [...settings.sessionHistory]
-        : [];
-
-    const historyMessages = sessionEnabled ? buildHistoryMessages(sessionHistory) : [];
-
-    let responseJson;
-
+    let resp;
     if (clip.kind === "image") {
-        responseJson = await client.createVisionResponse({
+        resp = await client.sendImage({
             model,
-            instructions: systemPrompt,
-            historyMessages,
-            imagePrompt: settings.imagePrompt || "",
-            imageDataUrl: clip.dataUrl
+            prePrompt,
+            previousResponseId,
+            imageDataUrl: clip.dataUrl,
+            hintText: "" // optionnel
         });
-
-        if (sessionEnabled) {
-            sessionHistory.push({ kind: "image", dataUrl: clip.dataUrl });
-            await SettingsStore.set({ sessionHistory });
-        }
-
-    } else if (clip.kind === "text") {
-        responseJson = await client.createTextResponse({
-            model,
-            instructions: systemPrompt,
-            historyMessages,
-            textPrompt: settings.textPrompt || "",
-            rawText: clip.text || ""
-        });
-
-        if (sessionEnabled) {
-            sessionHistory.push({ kind: "text", text: clip.text || "" });
-            await SettingsStore.set({ sessionHistory });
-        }
-
     } else {
-        throw new Error("Clipboard is empty or blocked.");
+        resp = await client.sendText({
+            model,
+            prePrompt,
+            previousResponseId,
+            text: clip.text || ""
+        });
     }
 
-    const answer = OpenAIResponsesClient.extractOutputText(responseJson);
+    if (sessionEnabled) {
+        const newId = OpenAIResponsesClient.extractResponseId(resp);
+        await SettingsStore.set({ sessionLastResponseId: newId });
+    }
+
+    const answer = OpenAIResponsesClient.extractText(resp);
     await ResponseStore.setLastAnswer(answer);
     await StateIndicator.setReady();
 }
@@ -468,29 +386,24 @@ async function runTextFlow(text) {
 
     const client = new OpenAIResponsesClient(settings.apiKey);
     const model = (settings.model || "gpt-4o-mini").trim();
-    const systemPrompt = settings.systemPrompt || "Tu es un assistant concis.";
+    const prePrompt = pickPrePrompt(settings);
+
     const sessionEnabled = !!settings.sessionEnabled;
+    const previousResponseId = sessionEnabled ? (settings.sessionLastResponseId || null) : null;
 
-    const sessionHistory = sessionEnabled && Array.isArray(settings.sessionHistory)
-        ? [...settings.sessionHistory]
-        : [];
-
-    const historyMessages = sessionEnabled ? buildHistoryMessages(sessionHistory) : [];
-
-    const responseJson = await client.createTextResponse({
+    const resp = await client.sendText({
         model,
-        instructions: systemPrompt,
-        historyMessages,
-        textPrompt: settings.textPrompt || "",
-        rawText: text || ""
+        prePrompt,
+        previousResponseId,
+        text: text || ""
     });
 
     if (sessionEnabled) {
-        sessionHistory.push({ kind: "text", text: text || "" });
-        await SettingsStore.set({ sessionHistory });
+        const newId = OpenAIResponsesClient.extractResponseId(resp);
+        await SettingsStore.set({ sessionLastResponseId: newId });
     }
 
-    const answer = OpenAIResponsesClient.extractOutputText(responseJson);
+    const answer = OpenAIResponsesClient.extractText(resp);
     await ResponseStore.setLastAnswer(answer);
     await StateIndicator.setReady();
 }
