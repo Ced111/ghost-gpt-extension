@@ -208,9 +208,12 @@ class ClipboardReader {
                             const types = item.types || [];
                             const pick =
                                 types.includes("image/png") ? "image/png" :
-                                    types.includes("image/jpeg") ? "image/jpeg" :
-                                        null;
-
+                                types.includes("image/jpeg") ? "image/jpeg" :
+                                types.includes("image/webp") ? "image/webp" :
+                                types.includes("image/gif") ? "image/gif" :
+                                types.includes("image/bmp") ? "image/bmp" :
+                                types.includes("image/tiff") ? "image/tiff" :
+                                null;
                             if (pick) {
                                 const blob = await item.getType(pick);
                                 const dataUrl = await blobToDataUrl(blob);
