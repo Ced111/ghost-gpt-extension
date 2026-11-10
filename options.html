@@ -1,50 +1,47 @@
 <!doctype html>
 <html lang="fr">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Ghost GPT - Options</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Ghost GPT — Options</title>
     <style>
-        body { font-family: system-ui, sans-serif; margin: 16px; max-width: 900px; }
-        label { display:block; margin: 12px 0 6px; font-weight: 600; }
-        input, textarea { width: 100%; padding: 10px; box-sizing: border-box; }
-        textarea { min-height: 160px; }
-        button { margin-top: 14px; padding: 10px 14px; cursor: pointer; }
-        .hint { color:#666; font-size: 13px; line-height: 1.4; }
-        code { background:#f3f3f3; padding: 2px 6px; border-radius: 6px; }
+        body { font-family: system-ui, sans-serif; margin: 32px auto; padding: 0 24px; max-width: 760px; color: #172033; background: #f7f9fc; }
+        main { background: white; padding: 28px; border: 1px solid #dce2eb; border-radius: 14px; }
+        h1 { font-size: 24px; margin-top: 0; }
+        label { display: block; margin: 20px 0 7px; font-weight: 600; }
+        input:not([type=checkbox]), textarea, select { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #aeb9ca; border-radius: 6px; font: inherit; }
+        textarea { min-height: 160px; resize: vertical; }
+        button { padding: 10px 14px; cursor: pointer; border: 1px solid #aeb9ca; border-radius: 6px; background: white; font: inherit; }
+        button:disabled { cursor: wait; opacity: .6; }
+        #save { background: #244bc2; color: white; border-color: #244bc2; }
+        .hint { color: #536176; font-size: 13px; line-height: 1.5; margin: 7px 0; }
+        .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+        #lastError { white-space: pre-wrap; overflow-wrap: anywhere; color: #a91e28; }
+        #status, #modelStatus { display: block; min-height: 20px; }
+        details { margin-top: 24px; }
     </style>
 </head>
-<body>
-
-<h2>Ghost GPT — Options</h2>
-
-<label>Clé API OpenAI</label>
-<input id="apiKey" type="password" placeholder="sk-..." />
-<div class="hint">
-    Stockée localement dans l'extension.
-</div>
-
-<label>Modèle</label>
-<input id="model" type="text" value="gpt-4o-mini" />
-<div class="hint">
-    Exemples : <code>gpt-4.1</code>, <code>gpt-4o</code>, <code>gpt-4o-mini</code>
-</div>
-
-<label>Pré-prompt unique (injecté une seule fois par session)</label>
-<textarea id="prePrompt">
-Tu es un assistant contrôleur de gestion très concis.
-Réponds en bullet points quand possible.
-</textarea>
-
-<div class="hint">
-    Ce pré-prompt est envoyé uniquement au premier message de la session,
-    puis conservé côté API via <code>previous_response_id</code>.
-</div>
-
-<button id="save">Enregistrer</button>
-<span id="status" class="hint"></span>
-
-<script src="options.js"></script>
-</body>
+<body><main>
+    <h1>Ghost GPT <small>1.1</small></h1>
+    <p class="hint">Copiez du texte ou une image, puis cliquez sur l’extension. Lorsque la coche apparaît, cliquez à nouveau pour copier la réponse.</p>
+    <label for="apiKey">Clé API OpenAI</label>
+    <input id="apiKey" type="password" placeholder="sk-…" autocomplete="off">
+    <p class="hint">Enregistrée dans le stockage local de cette extension.</p>
+    <label for="modelChoice">Modèles disponibles / suggestions</label>
+    <select id="modelChoice"><option value="">Choisir un modèle…</option></select>
+    <div class="row"><button id="refreshModels" type="button">Actualiser les modèles</button></div>
+    <span id="modelStatus" class="hint" role="status">Les suggestions nécessitent un accès avec votre clé API.</span>
+    <label for="model">Modèle</label>
+    <input id="model" type="text" value="gpt-4o-mini" spellcheck="false">
+    <p class="hint">Le choix ci-dessus remplit ce champ. Vous pouvez saisir un autre identifiant. La liste du compte indique l’accès, pas la compatibilité avec Responses et les images.</p>
+    <label for="prePrompt">Pré-prompt</label>
+    <textarea id="prePrompt">Tu es un assistant contrôleur de gestion très concis.
+Réponds en bullet points quand possible.</textarea>
+    <p class="hint">Envoyé au début de la session, puis conservé dans son historique. Avec la session désactivée, il est envoyé à chaque requête.</p>
+    <label><input id="sessionEnabled" type="checkbox"> Conserver le contexte entre les requêtes</label>
+    <p class="hint">Changer la clé, le modèle ou le pré-prompt démarre une nouvelle session après enregistrement.</p>
+    <div class="row"><button id="save" type="button">Enregistrer</button><button id="resetSession" type="button">Nouvelle session</button></div>
+    <span id="status" class="hint" role="status"></span>
+    <details open><summary>Dernière erreur</summary><p id="lastError" role="status">Aucune erreur.</p></details>
+</main><script src="api.js"></script><script src="options.js"></script></body>
 </html>
-

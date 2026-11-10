@@ -1,31 +1,81 @@
-const $ = (id) => document.getElementById(id);
+const $ = id => document.getElementById(id);
+const suggestions = ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'];
+
+function populateModels(ids, label) {
+    $('modelChoice').replaceChildren(new Option('Choisir un modèle…', ''));
+    const group = document.createElement('optgroup');
+    group.label = label;
+    for (const id of [...new Set(ids)].sort()) group.append(new Option(id, id));
+    $('modelChoice').append(group);
+    $('modelChoice').value = ids.includes($('model').value) ? $('model').value : '';
+}
 
 async function load() {
-    const data = await chrome.storage.local.get([
-        "apiKey",
-        "model",
-        "prePrompt"
-    ]);
-
-    $("apiKey").value = data.apiKey || "";
-    $("model").value = data.model || "gpt-4o-mini";
-    $("prePrompt").value = data.prePrompt || $("prePrompt").value;
+    const data = await chrome.storage.local.get(['apiKey', 'model', 'prePrompt', 'systemPrompt', 'sessionEnabled', 'lastError']);
+    $('apiKey').value = data.apiKey || '';
+    $('model').value = data.model || 'gpt-4o-mini';
+    $('prePrompt').value = data.prePrompt ?? data.systemPrompt ?? $('prePrompt').value;
+    $('sessionEnabled').checked = !!data.sessionEnabled;
+    $('lastError').textContent = data.lastError || 'Aucune erreur.';
+    populateModels(suggestions, 'Suggestions — disponibilité à vérifier');
 }
 
-async function save() {
-    const apiKey = $("apiKey").value.trim();
-    const model = $("model").value.trim() || "gpt-4o-mini";
-    const prePrompt = $("prePrompt").value || "";
+async function send(action, settings) {
+    const response = await chrome.runtime.sendMessage({ target: 'background', action, settings });
+    if (!response?.ok) throw new Error(response?.error || 'Extension indisponible. Rechargez-la.');
+}
 
-    await chrome.storage.local.set({
-        apiKey,
-        model,
-        prePrompt
+async function withStatus(button, action) {
+    button.disabled = true;
+    try {
+        await action();
+    } catch (error) {
+        $('status').textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+}
+
+$('modelChoice').addEventListener('change', () => {
+    if ($('modelChoice').value) $('model').value = $('modelChoice').value;
+});
+$('model').addEventListener('input', () => { $('modelChoice').value = $('model').value; });
+$('apiKey').addEventListener('input', () => {
+    populateModels(suggestions, 'Suggestions — disponibilité à vérifier');
+    $('modelStatus').textContent = 'Actualisez la liste avec cette clé.';
+});
+$('refreshModels').addEventListener('click', async () => {
+    const key = $('apiKey').value.trim();
+    if (!key) { $('modelStatus').textContent = 'Renseignez une clé API pour charger les modèles.'; return; }
+    $('refreshModels').disabled = true;
+    $('modelStatus').textContent = 'Chargement…';
+    try {
+        const data = await new OpenAIResponsesClient(key).request('models', null, 20000);
+        // Ignore a response for a key that the user has since changed.
+        if (key !== $('apiKey').value.trim()) return;
+        const ids = (data.data || []).map(item => item.id).filter(id =>
+            typeof id === 'string' && /^(gpt-|o[1-9])/.test(id) &&
+            !/audio|realtime|transcrib|tts|image|embedding|moderation|instruct/.test(id));
+        populateModels(ids, 'Accessibles avec cette clé — compatibilité à vérifier');
+        $('modelStatus').textContent = `${ids.length} modèles candidats. Les modèles spécialisés audio et génération d’images sont filtrés. Enregistrez pour appliquer votre choix.`;
+    } catch (error) {
+        $('modelStatus').textContent = error.message;
+    } finally {
+        $('refreshModels').disabled = false;
+    }
+});
+$('save').addEventListener('click', () => withStatus($('save'), async () => {
+    await send('saveSettings', {
+        apiKey: $('apiKey').value.trim(), model: $('model').value.trim() || 'gpt-4o-mini',
+        prePrompt: $('prePrompt').value, sessionEnabled: $('sessionEnabled').checked
     });
-
-    $("status").textContent = "Enregistré";
-    setTimeout(() => ($("status").textContent = ""), 1200);
-}
-
-$("save").addEventListener("click", save);
-load();
+    $('status').textContent = 'Configuration enregistrée.';
+}));
+$('resetSession').addEventListener('click', () => withStatus($('resetSession'), async () => {
+    await send('resetSession');
+    $('status').textContent = 'Nouvelle session prête.';
+}));
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.lastError) $('lastError').textContent = changes.lastError.newValue || 'Aucune erreur.';
+});
+load().catch(error => { $('status').textContent = error.message; });
