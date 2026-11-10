@@ -22,25 +22,23 @@
     </style>
 </head>
 <body><main>
-    <h1>Ghost GPT <small>1.1</small></h1>
+    <h1>Ghost GPT <small>1.1.1</small></h1>
     <p class="hint">Copiez du texte ou une image, puis cliquez sur l’extension. Lorsque la coche apparaît, cliquez à nouveau pour copier la réponse.</p>
     <label for="apiKey">Clé API OpenAI</label>
     <input id="apiKey" type="password" placeholder="sk-…" autocomplete="off">
     <p class="hint">Enregistrée dans le stockage local de cette extension.</p>
-    <label for="modelChoice">Modèles disponibles / suggestions</label>
-    <select id="modelChoice"><option value="">Choisir un modèle…</option></select>
+    <label for="model">Modèle</label>
+    <input id="model" type="text" list="modelSuggestions" value="gpt-4o-mini" spellcheck="false" autocomplete="off">
+    <datalist id="modelSuggestions"></datalist>
+    <p class="hint">Choisissez une suggestion ou saisissez un identifiant. Effacez le champ pour voir toute la liste.</p>
     <div class="row"><button id="refreshModels" type="button">Actualiser les modèles</button></div>
     <span id="modelStatus" class="hint" role="status">Les suggestions nécessitent un accès avec votre clé API.</span>
-    <label for="model">Modèle</label>
-    <input id="model" type="text" value="gpt-4o-mini" spellcheck="false">
-    <p class="hint">Le choix ci-dessus remplit ce champ. Vous pouvez saisir un autre identifiant. La liste du compte indique l’accès, pas la compatibilité avec Responses et les images.</p>
     <label for="prePrompt">Pré-prompt</label>
     <textarea id="prePrompt">Tu es un assistant contrôleur de gestion très concis.
 Réponds en bullet points quand possible.</textarea>
     <p class="hint">Envoyé au début de la session, puis conservé dans son historique. Avec la session désactivée, il est envoyé à chaque requête.</p>
-    <label><input id="sessionEnabled" type="checkbox"> Conserver le contexte entre les requêtes</label>
     <p class="hint">Changer la clé, le modèle ou le pré-prompt démarre une nouvelle session après enregistrement.</p>
-    <div class="row"><button id="save" type="button">Enregistrer</button><button id="resetSession" type="button">Nouvelle session</button></div>
+    <div class="row"><button id="save" type="button">Enregistrer</button></div>
     <span id="status" class="hint" role="status"></span>
     <details open><summary>Dernière erreur</summary><p id="lastError" role="status">Aucune erreur.</p></details>
 </main><script src="api.js"></script><script src="options.js"></script></body>

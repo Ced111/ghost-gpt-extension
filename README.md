@@ -1,6 +1,6 @@
 # Ghost GPT Clipboard
 
-Extension Chrome / Edge Manifest V3, version 1.1.0. Envoie du texte ou une image du presse-papiers à l’API OpenAI Responses.
+Extension Chrome / Edge Manifest V3, version 1.1.1. Envoie du texte ou une image du presse-papiers à l’API OpenAI Responses.
 
 ## Utilisation
 
@@ -26,7 +26,7 @@ L’actualisation du dépôt sur GitHub nécessite ensuite de mettre à jour les
 ## Modèles et configuration
 
 - Les réglages de la version 1.0 sont conservés. Le modèle déjà enregistré reste sélectionné.
-- Le sélecteur propose des modèles OpenAI, avec un champ libre pour les identifiants futurs.
+- Le champ Modèle propose des suggestions et accepte les identifiants saisis librement. Effacer le champ affiche toute la liste. Les commandes de session sont regroupées dans le menu clic droit de l’icône.
 - **Actualiser les modèles** interroge `/v1/models` avec la clé renseignée. Ce chargement n’enregistre pas les modifications. La liste filtre les familles spécialisées audio, embeddings et génération d’images.
 - Les modèles listés sont des candidats accessibles avec la clé. L’endpoint ne fournit pas leurs capacités. Le support de Responses et de l’entrée image reste propre à chaque modèle et est vérifié par la réponse de l’API lors de l’envoi.
 - `temperature: 0` est conservé pour GPT-4o et GPT-4.1. Les autres modèles utilisent leurs paramètres par défaut pour éviter les incompatibilités avec le raisonnement.
@@ -50,7 +50,7 @@ Avec Node.js 18 ou ultérieur, lancer `node --test tests/*.test.cjs`.
 
 Les tests couvrent la compatibilité des paramètres, l’entrée image, les erreurs HTTP, les réponses incomplètes, le cycle envoi/copie, les clics concurrents, la reprise après erreur et la migration des options. Les API Chrome et OpenAI sont simulées.
 
-La version 1.1.0 a passé ces tests et les contrôles de syntaxe. Le navigateur de l’environnement de développement ne pouvant pas démarrer, le test réel Chrome/Edge et l’appel avec une clé OpenAI n’ont pas été exécutés. Pour les vérifier, envoyer un texte court, copier la réponse, puis renouveler avec une capture d’écran. Vérifier également les deux opérations depuis un nouvel onglet et une page interne du navigateur.
+La version 1.1.1 a passé ces tests et les contrôles de syntaxe. Le navigateur de l’environnement de développement ne pouvant pas démarrer, le test réel Chrome/Edge et l’appel avec une clé OpenAI n’ont pas été exécutés. Pour les vérifier, envoyer un texte court, copier la réponse, puis renouveler avec une capture d’écran. Vérifier également les deux opérations depuis un nouvel onglet et une page interne du navigateur.
 
 ## Références
 

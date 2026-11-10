@@ -127,8 +127,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === 'resetSession') {
             await chrome.storage.local.set({ sessionLastResponseId: null });
         } else {
-            const { apiKey, model, prePrompt, sessionEnabled } = message.settings;
+            const { apiKey, model, prePrompt } = message.settings;
             const previous = await chrome.storage.local.get(['apiKey', 'model', 'prePrompt', 'sessionEnabled']);
+            const sessionEnabled = message.settings.sessionEnabled ?? !!previous.sessionEnabled;
             const changed = previous.apiKey !== apiKey || previous.model !== model ||
                 previous.prePrompt !== prePrompt || !!previous.sessionEnabled !== sessionEnabled;
             await chrome.storage.local.set({ apiKey, model, prePrompt, sessionEnabled,

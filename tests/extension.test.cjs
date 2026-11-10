@@ -145,3 +145,14 @@ test('offscreen clipboard uses paste event data, prevents HTML insertion and cle
     vm.runInContext('writeClipboard("Réponse")', scope);
     assert.equal(copy.value, '');
 });
+
+test('saving model options without a session control preserves the active session', async () => {
+    const app = extension();
+    app.state.sessionLastResponseId = 'resp_existing';
+    const result = await app.message({ action: 'saveSettings', settings: {
+        apiKey: 'test-key', model: 'gpt-6.1-sol', prePrompt: 'Consigne'
+    } });
+    assert.equal(result.ok, true);
+    assert.equal(app.state.sessionEnabled, true);
+    assert.equal(app.state.sessionLastResponseId, 'resp_existing');
+});

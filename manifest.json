@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Ghost GPT Clipboard",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Envoie l'image (ou le texte) du presse-papiers à OpenAI et copie la réponse, sans onglet ChatGPT.",
   "permissions": [
     "storage",

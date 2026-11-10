@@ -1,23 +1,17 @@
 const $ = id => document.getElementById(id);
 const suggestions = ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'];
 
-function populateModels(ids, label) {
-    $('modelChoice').replaceChildren(new Option('Choisir un modèle…', ''));
-    const group = document.createElement('optgroup');
-    group.label = label;
-    for (const id of [...new Set(ids)].sort()) group.append(new Option(id, id));
-    $('modelChoice').append(group);
-    $('modelChoice').value = ids.includes($('model').value) ? $('model').value : '';
+function populateModels(ids) {
+    $('modelSuggestions').replaceChildren(...[...new Set(ids)].sort().map(id => new Option(id, id)));
 }
 
 async function load() {
-    const data = await chrome.storage.local.get(['apiKey', 'model', 'prePrompt', 'systemPrompt', 'sessionEnabled', 'lastError']);
+    const data = await chrome.storage.local.get(['apiKey', 'model', 'prePrompt', 'systemPrompt', 'lastError']);
     $('apiKey').value = data.apiKey || '';
     $('model').value = data.model || 'gpt-4o-mini';
     $('prePrompt').value = data.prePrompt ?? data.systemPrompt ?? $('prePrompt').value;
-    $('sessionEnabled').checked = !!data.sessionEnabled;
     $('lastError').textContent = data.lastError || 'Aucune erreur.';
-    populateModels(suggestions, 'Suggestions — disponibilité à vérifier');
+    populateModels(suggestions);
 }
 
 async function send(action, settings) {
@@ -36,12 +30,8 @@ async function withStatus(button, action) {
     }
 }
 
-$('modelChoice').addEventListener('change', () => {
-    if ($('modelChoice').value) $('model').value = $('modelChoice').value;
-});
-$('model').addEventListener('input', () => { $('modelChoice').value = $('model').value; });
 $('apiKey').addEventListener('input', () => {
-    populateModels(suggestions, 'Suggestions — disponibilité à vérifier');
+    populateModels(suggestions);
     $('modelStatus').textContent = 'Actualisez la liste avec cette clé.';
 });
 $('refreshModels').addEventListener('click', async () => {
@@ -56,7 +46,7 @@ $('refreshModels').addEventListener('click', async () => {
         const ids = (data.data || []).map(item => item.id).filter(id =>
             typeof id === 'string' && /^(gpt-|o[1-9])/.test(id) &&
             !/audio|realtime|transcrib|tts|image|embedding|moderation|instruct/.test(id));
-        populateModels(ids, 'Accessibles avec cette clé — compatibilité à vérifier');
+        populateModels(ids);
         $('modelStatus').textContent = `${ids.length} modèles candidats. Les modèles spécialisés audio et génération d’images sont filtrés. Enregistrez pour appliquer votre choix.`;
     } catch (error) {
         $('modelStatus').textContent = error.message;
@@ -67,13 +57,9 @@ $('refreshModels').addEventListener('click', async () => {
 $('save').addEventListener('click', () => withStatus($('save'), async () => {
     await send('saveSettings', {
         apiKey: $('apiKey').value.trim(), model: $('model').value.trim() || 'gpt-4o-mini',
-        prePrompt: $('prePrompt').value, sessionEnabled: $('sessionEnabled').checked
+        prePrompt: $('prePrompt').value
     });
     $('status').textContent = 'Configuration enregistrée.';
-}));
-$('resetSession').addEventListener('click', () => withStatus($('resetSession'), async () => {
-    await send('resetSession');
-    $('status').textContent = 'Nouvelle session prête.';
 }));
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes.lastError) $('lastError').textContent = changes.lastError.newValue || 'Aucune erreur.';
